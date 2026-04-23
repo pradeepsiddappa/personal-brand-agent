@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pa/styles.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234F46E5'/><text x='16' y='21' font-family='Georgia,serif' font-size='16' font-weight='bold' fill='white' text-anchor='middle'>PA</text></svg>">
+<script src="/pa/js/api.js"></script>
+<script src="/pa/js/app.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body>
+
+<div class="app-wrap" x-data="appShell()" x-init="init()">
+
+  <!-- Toast -->
+  <div class="toast" x-show="toast" x-transition :class="toast?.kind" role="status" aria-live="polite">
+    <span x-text="toast?.msg"></span>
+  </div>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="left">
+      <div class="logo">PA</div>
+      <div class="title">Personal Agent</div>
+    </div>
+    <div class="right">
+      <span class="dot live"></span>
+      <span class="clock" x-text="clock"></span>
+      <span x-text="user?.email ?? ''"></span>
+      <button class="btn-icon" @click="signOut()" title="Sign out">&#x23FB;</button>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <nav class="tabs">
+    <template x-for="t in tabs" :key="t.id">
+      <button
+        @click="view = t.id"
+        :class="view === t.id ? 'active' : ''"
+        x-text="t.label"></button>
+    </template>
+  </nav>
+
+  <!-- Main content -->
+  <main class="app-main">
+
+    <!-- ══════ FLOW ══════ -->
+    <section x-show="view === 'flow'">
+      <!-- Uber Goal: onboarding / display / inline editor -->
+      <template x-if="!uberGoal && !editingGoal">
+        <div class="uber-goal onboard">
+          <div class="tiny">Step 1 · Set your uber goal</div>
+          <div class="text">What are you building toward on Twitter + LinkedIn?</div>
+          <p class="help-text">One sentence. This is the north star every agent reads before acting:</p>
+          <ul class="help-list">
+            <li><strong>Scout</strong> filters signals that match your goal</li>
+            <li><strong>Writer</strong> drafts tweets that serve it</li>
+            <li><strong>Editor</strong> rejects drafts that drift from it</li>
+            <li><strong>Analyst</strong> scores weekly performance against it</li>
+          </ul>
+          <div class="examples">
+            <div class="ex-label">Examples</div>
+            <div class="ex-item">“Establish myself as a trusted voice on AI + design for founders.”</div>
+            <div class="ex-item">“Share daily lessons from building {your project} so others learn faster.”</div>
+          </div>
+          <button class="btn primary" @click="startEditGoal()">Set uber goal</button>
+        </div>
+      </template>
+
+      <template x-if="editingGoal">
+        <div class="uber-goal editing">
+          <div class="tiny">Uber Goal</div>
+          <textarea x-model="goalDraft" class="goal-input" rows="3" placeholder="One sentence. What are you building toward?" @keydown.meta.enter="saveUberGoal()" @keydown.ctrl.enter="saveUberGoal()"></textarea>
+          <div class="edit-actions">
+            <button class="btn primary" @click="saveUberGoal()">Save goal</button>
+            <button class="btn ghost" @click="cancelEditGoal()">Cancel</button>
+            <span class="kbd-hint">⌘/Ctrl + Enter to save</span>
+          </div>
+          <p class="help-text">Change this anytime — your next Writer run will pick it up.</p>
+        </div>
+      </template>
+
+      <template x-if="uberGoal && !editingGoal">
+        <div class="uber-goal">
+          <div class="row-head">
+            <div class="tiny">Uber Goal</div>
+            <button class="btn sm ghost" @click="startEditGoal()">Edit</button>
+          </div>
+          <div class="text" x-text="uberGoal"></div>
+          <p class="help-text">Scout, Writer, Editor, and Analyst all read this before acting.</p>
+        </div>
+      </template>
+
+      <!-- ── Flow Hero ── -->
+      <div class="flow-hero">
+        <div class="flow-hero-head">
+          <div>
+            <div class="flow-eyebrow">THE FLOW</div>
+            <h1 class="flow-title" x-text="agentCountLabel + ', one desk.'"></h1>
+            <p class="flow-subtitle">Signals go in on the left. Tweets come out on the right. You're the only human in the loop — between Messenger and Publisher.</p>
+          </div>
+          <div class="flow-meta">
+            <div class="flow-pill flight" x-show="inFlightCount > 0">
+              <span class="flow-dot running"></span>
+              <span x-text="inFlightCount + ' in flight'"></span>
+            </div>
+            <div class="flow-pill muted" x-show="lastTickLabel">
+              <span x-text="'last tick · ' + lastTickLabel"></span>
+            </div>
+            <button class="btn sm primary" @click="runPipeline()" :class="runningPipeline ? 'running' : ''" x-text="runningPipeline ? (pipelineStage ? 'Running · ' + pipelineStage + '…' : 'Running pipeline…') : 'Run pipeline'"></button>
+            <button class="btn sm ghost" @click="refreshPipeline(); loadEvents()" title="Refresh">↻</button>
+          </div>
+        </div>
+
+        <div class="flow-timeline">
+          <template x-for="(node, i) in flowNodes" :key="node.id">
+            <div class="flow-cell" :class="'tone-' + node.tone + ' state-' + node.state">
+              <!-- Hover tooltip with full draft text -->
+              <template x-if="node.draftId">
+                <div class="flow-tip">
+                  <div class="flow-tip-head">
+                    <span class="draft-id" x-text="node.draftId"></span>
+                    <span class="flow-tip-stage" x-text="node.name + ' stage'"></span>
+                  </div>
+                  <p class="flow-tip-text" x-text="node.draftFullText"></p>
+                </div>
+              </template>
+
+              <div class="flow-cell-head">
+                <span class="agt-label" x-text="'AGT · ' + String(i+1).padStart(2,'0')"></span>
+                <span class="flow-dot" :class="node.state"></span>
+              </div>
+
+              <div class="flow-box" @click="view = 'agents'">
+                <svg class="flow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <g x-show="node.icon === 'target'"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8"/></g>
+                  <path x-show="node.icon === 'pen'" d="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+                  <path x-show="node.icon === 'check'" d="M5 13l4 4L19 7"/>
+                  <g x-show="node.icon === 'send'"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></g>
+                  <g x-show="node.icon === 'upright'"><path d="M7 17L17 7"/><path d="M7 7h10v10"/></g>
+                  <path x-show="node.icon === 'wave'" d="M3 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0"/>
+                </svg>
+              </div>
+
+              <h3 class="flow-name" x-text="node.name"></h3>
+              <div class="flow-role" x-text="node.role"></div>
+
+              <div class="flow-info">
+                <template x-if="node.draftId">
+                  <div>
+                    <div class="draft-chip">
+                      <span class="flow-dot running"></span>
+                      <span x-text="node.draftId"></span>
+                    </div>
+                    <p class="draft-preview" x-text="'&quot;' + node.draftText + '&quot;'"></p>
+                  </div>
+                </template>
+                <template x-if="!node.draftId && node.running">
+                  <div>
+                    <div class="run-label">RUNNING NOW</div>
+                    <div class="run-time">just started</div>
+                  </div>
+                </template>
+                <template x-if="!node.draftId && !node.running && node.nextRun">
+                  <div>
+                    <div class="run-label">NEXT RUN</div>
+                    <div class="run-time" x-text="node.nextRun"></div>
+                    <div class="last-run" x-show="node.lastRunAgo" x-text="'ran ' + node.lastRunAgo"></div>
+                  </div>
+                </template>
+                <template x-if="!node.draftId && !node.running && !node.nextRun">
+                  <div>
+                    <div class="run-label">LAST RUN</div>
+                    <div class="run-time" x-text="node.lastRunAgo || 'never'"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Human-in-loop marker sits between Messenger (i=3) and Publisher (i=4) -->
+              <div class="flow-loop" x-show="i === 3" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 7l5 9H7z"/>
+                </svg>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="flow-legend">
+          <span class="legend-label">legend:</span>
+          <span class="legend-item"><span class="flow-dot running"></span>in flight</span>
+          <span class="legend-item"><span class="flow-dot idle"></span>idle</span>
+          <span class="legend-item legend-loop">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 7l5 9H7z"/></svg>
+            human in the loop
+          </span>
+          <span class="legend-tip">click an agent to inspect</span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 24px;">
+        <div class="card-title">Analyst</div>
+        <p x-text="analystSummary"></p>
+        <p class="help-text" style="margin-top:8px;">The Analyst runs every Sunday at 20:00 IST. It reviews the week's drafts, tracks engagement, and sends recommendations to improve future tweets.</p>
+      </div>
+    </section>
+
+    <!-- ══════ TIMELINE ══════ -->
+    <section x-show="view === 'timeline'">
+      <div class="section-head"><h2>Timeline</h2></div>
+      <p class="help-text">Every agent action is logged here. You'll see when Scout finds signals, Writer drafts, you approve/reject, and Publisher posts. Newest events first.</p>
+      <template x-if="timelineGroups.length === 0">
+        <div class="empty-state">
+          <p>No events yet.</p>
+          <p class="help-text">Connect your API keys in <strong>Settings</strong>, then click "Run now" on any agent in the <strong>Agents</strong> tab to see activity here.</p>
+        </div>
+      </template>
+      <template x-for="group in timelineGroups" :key="group.date">
+        <div class="timeline-day">
+          <h3 x-text="group.date"></h3>
+          <template x-for="ev in group.items" :key="ev.id">
+            <div class="timeline-item">
+              <div class="time" x-text="ev.time"></div>
+              <div class="msg"><strong x-text="ev.agent + ' · ' + ev.title"></strong> — <span x-text="ev.detail"></span></div>
+              <span class="chip muted" x-text="ev.tag"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+    </section>
+
+    <!-- ══════ APPROVAL ══════ -->
+    <section x-show="view === 'approval'">
+      <div class="section-head">
+        <h2>Approval Queue</h2>
+        <div class="actions">
+          <button class="btn sm" @click="refreshPipeline(); loadEvents()">Refresh</button>
+        </div>
+      </div>
+      <p class="help-text">Drafts waiting for your decision. <strong>Post to both</strong> cross-posts to Twitter + LinkedIn. <strong>Twitter only</strong> / <strong>LinkedIn only</strong> posts to just that platform. <strong>Reject</strong> drops it. <strong>✎ Edit</strong> lets you fix copy directly. <strong>✨ Tweak with AI</strong> rewrites the draft based on a one-line instruction ("make it shorter", "more casual", "lead with the number").</p>
+
+      <template x-if="pendingDrafts.length === 0">
+        <div class="empty-state">
+          <p>No drafts waiting.</p>
+          <p class="help-text">Run the pipeline from the Flow tab or the Agents tab to generate drafts.</p>
+        </div>
+      </template>
+
+      <div class="approval-list">
+        <template x-for="d in pendingDrafts" :key="d.id">
+          <div class="approval-card">
+            <div class="approval-head">
+              <span class="draft-id" x-text="d.id"></span>
+              <span class="draft-category" x-text="(d.category || '').toUpperCase()"></span>
+              <span class="draft-category" x-show="d.draft_type && d.draft_type !== 'single'" x-text="(d.draft_type || '').toUpperCase()"></span>
+              <span class="draft-meta" x-show="d.confidence" x-text="'conf: ' + d.confidence"></span>
+              <span class="draft-meta" x-text="(d.draft_type === 'thread' && d.thread_parts ? d.thread_parts.length + ' tweets' : (d.text || '').length + ' / ' + (d.draft_type === 'longpost' ? 3000 : 280))"></span>
+            </div>
+            <div class="approval-tabs" x-data="{ view: 'twitter' }">
+              <div class="approval-tab-bar" x-show="d.text_linkedin">
+                <button class="approval-tab" :class="view === 'twitter' ? 'active' : ''" @click="view = 'twitter'">🐦 Twitter</button>
+                <button class="approval-tab" :class="view === 'linkedin' ? 'active' : ''" @click="view = 'linkedin'">💼 LinkedIn</button>
+              </div>
+
+              <!-- INLINE EDIT MODE -->
+              <template x-if="d._editing">
+                <div>
+                  <label class="settings-label">Twitter version</label>
+                  <textarea class="input" rows="5" x-model="d._editText" maxlength="3000"></textarea>
+                  <label class="settings-label" style="margin-top:12px;">LinkedIn version</label>
+                  <textarea class="input" rows="6" x-model="d._editTextLinkedin" maxlength="3000"></textarea>
+                  <div class="approval-actions" style="margin-top:12px;">
+                    <button class="btn primary" :class="d._saving ? 'running' : ''" @click="saveEditDraft(d)" x-text="d._saving ? 'Saving…' : '💾 Save'"></button>
+                    <button class="btn ghost" @click="cancelEditDraft(d)">Cancel</button>
+                  </div>
+                </div>
+              </template>
+
+              <!-- READ-ONLY VIEW (default) -->
+              <template x-if="!d._editing">
+                <div>
+                  <template x-if="view === 'twitter' && d.draft_type !== 'thread'">
+                    <p class="approval-text" x-text="d.text"></p>
+                  </template>
+                  <template x-if="view === 'twitter' && d.draft_type === 'thread' && d.thread_parts">
+                    <div class="thread-stack">
+                      <template x-for="(part, i) in d.thread_parts" :key="i">
+                        <div class="thread-part">
+                          <span class="thread-num" x-text="(i+1) + '/' + d.thread_parts.length"></span>
+                          <p x-text="part"></p>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="view === 'linkedin'">
+                    <p class="approval-text approval-text-long" x-text="d.text_linkedin || d.text"></p>
+                  </template>
+                </div>
+              </template>
+
+            </div>
+
+            <div class="approval-image" x-show="d.image_svg && !d._editing" x-html="d.image_svg"></div>
+
+            <div class="approval-actions" x-show="!d._editing">
+              <button class="btn primary" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter','linkedin'])" x-text="d._deciding ? 'Working…' : '✓ Post to both'"></button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter'])">Twitter only</button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['linkedin'])">LinkedIn only</button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'reject')">✕ Reject</button>
+              <button class="btn ghost" @click="startEditDraft(d)" title="Inline edit the draft text">✎ Edit</button>
+              <button class="btn ghost" @click="startTweakDraft(d)" x-show="!d._tweaking" title="Ask AI to rewrite based on your one-line instruction">✨ Tweak with AI</button>
+              <button class="btn ghost" @click="regenerateImage(d)" title="Re-render the image from the current tweet text (fixes empty cards)">🔄 Re-render</button>
+              <button class="btn ghost" @click="deleteDraftHard(d)" title="Hard-delete (for hallucinated drafts)">🗑 Delete</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <template x-if="recentDecisions.length > 0">
+        <div class="approval-history">
+          <h3>Recent decisions</h3>
+          <template x-for="d in recentDecisions" :key="d.id">
+            <div class="approval-history-row" :class="'stage-' + d.stage">
+              <span class="draft-id" x-text="d.id"></span>
+              <span class="stage-chip" x-text="d.stage"></span>
+              <span class="history-text" x-text="(d.text || '').slice(0, 100) + ((d.text || '').length > 100 ? '…' : '')"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Tweak-with-AI modal — overlays whichever draft has _tweaking=true. -->
+      <template x-for="d in pendingDrafts" :key="'tweak-' + d.id">
+        <div class="modal-backdrop" x-show="d._tweaking" x-transition.opacity @click.self="cancelTweakDraft(d)">
+          <div class="modal-card" @click.stop>
+            <div class="modal-head">
+              <h3>✨ Tweak <span class="draft-id" x-text="d.id"></span> with AI</h3>
+              <button class="modal-close" @click="cancelTweakDraft(d)" aria-label="Close">×</button>
+            </div>
+            <p class="help-text">Describe the change in one line. AI rewrites the draft preserving its type and image.</p>
+
+            <input type="text" class="input" x-model="d._tweakInstruction"
+              placeholder='e.g. "make it more casual" / "shorter" / "lead with the number" / "first person"'
+              @keydown.enter="submitTweakDraft(d)"
+              x-init="$nextTick(() => $el.focus())" />
+
+            <div class="modal-presets">
+              <button class="btn sm" @click="d._tweakInstruction = 'Make it shorter and punchier'; submitTweakDraft(d)">Shorter</button>
+              <button class="btn sm" @click="d._tweakInstruction = 'Make it more casual and conversational'; submitTweakDraft(d)">More casual</button>
+              <button class="btn sm" @click="d._tweakInstruction = 'Lead with the most specific number or fact'; submitTweakDraft(d)">Lead with number</button>
+              <button class="btn sm" @click="d._tweakInstruction = 'Rewrite in first person, no third-person framing'; submitTweakDraft(d)">First person</button>
+              <button class="btn sm" @click="d._tweakInstruction = 'Add a stronger hook in the first line'; submitTweakDraft(d)">Stronger hook</button>
+            </div>
+
+            <div class="modal-actions">
+              <button class="btn primary" :class="d._tweaking_busy ? 'running' : ''" @click="submitTweakDraft(d)" x-text="d._tweaking_busy ? 'Rewriting…' : '✨ Rewrite'"></button>
+              <button class="btn ghost" @click="cancelTweakDraft(d)">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- ══════ ANALYTICS ══════ -->
+    <section x-show="view === 'analytics'">
+      <div class="section-head"><h2>Analytics</h2></div>
+      <div class="empty-state">
+        <p>Weekly stats will appear here after the Analyst runs.</p>
+        <p class="help-text">The Analyst tracks: approval rate, best-performing post category, optimal posting time, voice drift, and trending topics you missed. It runs every Sunday at 20:00 IST automatically.</p>
+      </div>
+    </section>
+
+    <!-- ══════ AGENTS ══════ -->
+    <section x-show="view === 'agents'">
+      <div class="section-head">
+        <h2>Agents</h2>
+        <div class="actions">
+          <button class="btn sm" @click="view = 'flow'; startEditGoal()">Edit uber-goal</button>
+          <button class="btn sm primary" @click="addAgent()">+ Add agent</button>
+        </div>
+      </div>
+      <p class="help-text">These are your 6 content agents. Each has a role, a goal, and a prompt template that Claude uses. Click "Edit" to customise a prompt, or "Run now" to trigger an agent manually. Toggle the switch to enable/disable.</p>
+
+      <div class="uber-goal" x-show="uberGoal" style="margin-bottom: 28px;">
+        <div class="row-head">
+          <div class="tiny">Uber Goal</div>
+          <button class="btn sm ghost" @click="view = 'flow'; startEditGoal()">Edit</button>
+        </div>
+        <div class="text" x-text="uberGoal"></div>
+      </div>
+
+      <div class="agents-grid">
+        <template x-for="(a, idx) in agents" :key="a.id">
+          <div class="agent-card" :data-agent="a.id" :class="isRunningOf(a.id) || a._running ? 'is-running' : ''">
+            <div class="head">
+              <span class="num" x-text="String(idx+1).padStart(2,'0')"></span>
+              <div class="head-right">
+                <span class="run-badge" x-show="isRunningOf(a.id) || a._running">
+                  <span class="flow-dot running"></span>Running
+                  <button class="run-badge-clear" @click.stop="clearStuck(a)" title="Clear stuck state">✕</button>
+                </span>
+                <div class="toggle" :class="a.enabled ? 'on' : ''" @click="toggleAgent(a)"></div>
+              </div>
+            </div>
+            <h3 x-text="a.name"></h3>
+            <div class="role" x-text="a.role"></div>
+            <div class="goal" x-text="a.goal || '(no goal set)'"></div>
+            <div class="last-run-row">
+              <span class="last-run-label">Last run:</span>
+              <span class="last-run-value" x-text="lastCompletedRunOf(a.id) ? timeAgo(lastCompletedRunOf(a.id)) : 'never'"></span>
+            </div>
+            <div class="pause-row" x-show="isPausedNow(a)">
+              <span class="pause-chip">⏸ <span x-text="pausedUntilLabel(a)"></span></span>
+              <button class="btn sm ghost" @click="pauseAgent(a, 0)">Resume</button>
+            </div>
+            <div class="foot">
+              <span x-text="a.schedule === 'manual' ? 'manual' : a.schedule"></span>
+              <span x-text="a.depends_on?.length ? 'after: ' + a.depends_on.join(', ') : 'independent'"></span>
+            </div>
+            <div class="actions">
+              <button class="btn sm" @click="editAgent(a)">Edit</button>
+              <button class="btn sm" @click="runAgent(a)" :class="(isRunningOf(a.id) || a._running) ? 'running' : ''" x-text="(isRunningOf(a.id) || a._running) ? 'Running…' : 'Run now'"></button>
+              <div class="pause-menu" x-data="{ open: false }" @click.outside="open = false">
+                <button class="btn sm" @click="open = !open" x-show="!isPausedNow(a)">Pause ▾</button>
+                <div class="pause-menu-dropdown" x-show="open" x-transition>
+                  <button @click="pauseAgent(a, 1); open = false">1 hour</button>
+                  <button @click="pauseAgent(a, 6); open = false">6 hours</button>
+                  <button @click="pauseAgent(a, 24); open = false">1 day</button>
+                  <button @click="pauseAgent(a, 24 * 7); open = false">1 week</button>
+                </div>
+              </div>
+              <button class="btn sm ghost" @click="resetAgentPrompt(a)" title="Reset prompt template to the latest built-in default">↺ Reset</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ══════ SETTINGS ══════ -->
+    <section x-show="view === 'settings'">
+      <div class="section-head"><h2>Settings</h2></div>
+      <p class="help-text" style="margin-bottom: 20px;">Click a section header to expand. Your open/closed state is remembered across visits.</p>
+
+      <!-- ── Group 1: Brand identity ── -->
+      <div class="settings-group">
+        <button type="button" class="settings-group-head" @click="toggleSettings('brand')">
+          <span class="settings-group-chevron" x-text="settingsOpen.brand ? '▼' : '▶'"></span>
+          <span class="settings-group-title">Brand identity</span>
+          <span class="settings-group-hint">voice · colors · font · design · promos · links · templates</span>
+        </button>
+        <div class="settings-group-body" x-show="settingsOpen.brand" x-transition>
+
+      <!-- Brand context — used by Writer + SEO -->
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <h3>Brand context</h3>
+          <button class="btn sm primary" @click="saveBrand()" :class="brandSaving ? 'running' : ''" x-text="brandSaving ? 'Saving…' : 'Save'"></button>
+        </div>
+        <p class="help-text">Writer uses this to mirror your tone. SEO agent uses your website URL to audit pages weekly.</p>
+        <label class="settings-label">Website URL</label>
+        <input type="url" class="input" x-model="brandForm.website_url" placeholder="https://yourdomain.com">
+        <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:baseline; gap:12px;">
+          <label class="settings-label" style="margin-top:0;">Brand voice / positioning</label>
+          <button class="btn sm ghost" @click="openPersonaPicker()" title="Pre-fill brand voice + uber goal + references from a starter persona">✨ Apply a starter persona</button>
+        </div>
+        <textarea class="input" rows="6" x-model="brandForm.brand_voice"
+          placeholder="{Your role / background in one line}. {Your key projects}. Voice: direct, specific, first-person. Avoid: jargon, corporate-speak, hype. Always: short sentences, real numbers, specific stories."></textarea>
+        <p class="help-text" style="margin-top:8px;">Tip: paste 2–3 lines from your About page or LinkedIn bio, plus a sentence on what you avoid in your writing.</p>
+
+        <label class="settings-label" style="margin-top:18px;">Brand accent color <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="color" x-model="brandForm.brand_accent_hex" style="width:48px; height:40px; border:1px solid var(--border); border-radius:6px; padding:2px; cursor:pointer;">
+          <input type="text" class="input mono" x-model="brandForm.brand_accent_hex" placeholder="#E11D48" style="flex:1; max-width:160px;">
+          <span class="help-text" style="margin:0;">Applied to every image card (poster CTA bar, stat number, card accents). Leave blank for the per-category default palette.</span>
+        </div>
+
+        <label class="settings-label" style="margin-top:18px;">Image font <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <select class="input" x-model="brandForm.image_font" style="max-width:300px;">
+            <option value="Inter">Inter — clean, neutral sans</option>
+            <option value="IBM Plex Sans">IBM Plex Sans — editorial hybrid</option>
+            <option value="Space Grotesk">Space Grotesk — quirky sans (site legacy)</option>
+            <option value="Noto Sans">Noto Sans — universal, reliable</option>
+            <option value="Lora">Lora — serif, literary</option>
+            <option value="JetBrains Mono">JetBrains Mono — technical, code-like</option>
+          </select>
+          <span class="help-text" style="margin:0;">Font family used for text on every generated card.</span>
+        </div>
+
+        <label class="settings-label" style="margin-top:18px;">Design language <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <textarea class="input" rows="3" x-model="brandForm.design_language"
+          placeholder="Bold typographic posters. Black backgrounds. Minimal chrome. Big numbers, short lines. Lean into white + accent on dark, not pastels."></textarea>
+        <p class="help-text" style="margin-top:8px;">Writer reads this when picking image kinds and layouts. Keep it short — 2–4 lines. Tone matters more than specifics.</p>
+
+        <label class="settings-label" style="margin-top:18px;">Link library <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <textarea class="input" rows="6" x-model="brandForm.reference_links"
+          placeholder="• {Your main project} → https://yourdomain.com&#10;• {Another project / case study} → https://yourdomain.com/x&#10;• GitHub → https://github.com/yourusername&#10;• Newsletter / blog → https://yourdomain.com/newsletter"></textarea>
+        <p class="help-text" style="margin-top:8px;">One bullet per link with a short description of what it is. Writer appends the matching URL to the tweet ONLY when the draft is specifically about that thing — never forces a link in. Different from Active promotions (which drives posters + dedicated promo drafts).</p>
+
+        <label class="settings-label" style="margin-top:18px;">Custom tweet templates <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <textarea class="input" rows="5" x-model="brandForm.tweet_templates"
+          placeholder="### Template: my-format-name&#10;When to use: [short description]&#10;Pattern:&#10;[Line 1 with placeholder]&#10;[Line 2 with placeholder]&#10;&#10;### Template: another-format&#10;..."></textarea>
+        <p class="help-text" style="margin-top:8px;">Writer already has 8 built-in formats (breaking-drop, hot-take, build-log, teach-1-thing, list-post, counter-intuitive, personal-milestone, quote-take). Add your own here — they stack on top of the defaults. Leave blank to use just the 8 built-ins.</p>
+
+        <label class="settings-label" style="margin-top:18px;">Active promotions <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <textarea class="input" rows="5" x-model="brandForm.promotions"
+          placeholder="• {Your current campaign} — {dates / format} | {location} | {capacity} | https://yourdomain.com/signup&#10;• {Another active promotion} — {one-line pitch} | https://yourdomain.com/x"></textarea>
+        <p class="help-text" style="margin-top:8px;">
+          List what you're actively promoting right now — cohorts, launches, campaigns. <strong>One bullet per promotion</strong>. Include the URL.
+          <br>Writer will weave at least one of these into every 3-draft run as a <em>poster-style image post</em> (bold headline + red accent word + CTA bar with your URL).
+          <br>Clear this field when the cohort is over so Writer stops promoting it.
+        </p>
+      </div>
+
+        </div>
+      </div>
+
+      <!-- ── Group 2: Content tools ── -->
+      <div class="settings-group">
+        <button type="button" class="settings-group-head" @click="toggleSettings('content')">
+          <span class="settings-group-chevron" x-text="settingsOpen.content ? '▼' : '▶'"></span>
+          <span class="settings-group-title">Content tools</span>
+          <span class="settings-group-hint">bulk inspiration · GitHub for SEO auto-commit</span>
+        </button>
+        <div class="settings-group-body" x-show="settingsOpen.content" x-transition>
+
+      <!-- Bulk inspiration paste — dump a stack of tweets into voice_examples -->
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <h3>Inspiration vault — bulk paste</h3>
+          <button class="btn sm primary" @click="saveBulkVoice()" :class="bulkVoiceSaving ? 'running' : ''" x-text="bulkVoiceSaving ? 'Adding…' : 'Add to voice library'"></button>
+        </div>
+        <p class="help-text">Paste 10-30 tweets you admire — one tweet per block, separated by a <strong>blank line</strong>. Each block becomes a voice example Writer reads on every run. Way faster than forwarding them one-by-one to Telegram.</p>
+        <textarea class="input" rows="8" x-model="bulkVoiceText"
+          placeholder="Someone built a swarm of thousands of AI agents. Here's what it does:&#10;→ Spins up autonomous agents&#10;→ Each has memory + personality&#10;17,300 stars. +2,907 in a day. 100% open source.&#10;&#10;Shipped a new feature today. 3x response rate on day one. The unsexy truth: we spent 2 weeks on edge-case prompting, not on the model choice.&#10;&#10;Most founders miss this: Users don't care which framework you picked. They care if it works.&#10;&#10;(Paste more tweets, blank line between each)"></textarea>
+        <p class="help-text" style="margin-top:8px;">Safe to re-run — duplicates are fine, Writer just picks the 8 most recent on each run.</p>
+      </div>
+
+      <!-- GitHub for SEO auto-commit -->
+      <div class="settings-card" style="margin-top: 20px;">
+        <div class="settings-card-head">
+          <h3>GitHub (for SEO auto-commit)</h3>
+          <button class="btn sm primary" @click="saveGithub()" :class="githubSaving ? 'running' : ''" x-text="githubSaving ? 'Saving…' : 'Save'"></button>
+        </div>
+        <p class="help-text">When SEO sends you a Telegram card and you tap <strong>✓ Apply</strong>, the change is committed straight to your repo's main branch. Token needs <em>Contents: Read &amp; Write</em> on the target repo only.</p>
+        <label class="settings-label">Repo (<code>owner/name</code>)</label>
+        <input type="text" class="input mono" x-model="githubForm.github_repo" placeholder="yourusername/your-site-repo">
+        <label class="settings-label" style="margin-top:14px;">Branch</label>
+        <input type="text" class="input mono" x-model="githubForm.github_branch" placeholder="main">
+        <label class="settings-label" style="margin-top:14px;">Personal Access Token (fine-grained)</label>
+        <input type="password" class="input mono" x-model="githubForm.github_token" autocomplete="off" :placeholder="githubForm.github_token_set ? '••••••• (saved — leave blank to keep)' : 'github_pat_11A...'">
+        <p class="help-text" style="margin-top:8px;">Create at github.com/settings/tokens?type=beta → "Generate new token" → only your repo → Contents: Read & Write.</p>
+      </div>
+
+        </div>
+      </div>
+
+      <!-- ── Group 3: API keys & connections ── -->
+      <div class="settings-group">
+        <button type="button" class="settings-group-head" @click="toggleSettings('connections')">
+          <span class="settings-group-chevron" x-text="settingsOpen.connections ? '▼' : '▶'"></span>
+          <span class="settings-group-title">API keys &amp; connections</span>
+          <span class="settings-group-hint">Claude · Twitter · Telegram · LinkedIn · Quick setup guide</span>
+        </button>
+        <div class="settings-group-body" x-show="settingsOpen.connections" x-transition>
+
+      <p class="help-text" style="margin-top: 8px;">Connect your own API keys below. All keys are encrypted at rest (AES-256-GCM) and never exposed to the browser. Click "Test" to verify a connection works.</p>
+
+      <div class="settings-list">
+        <template x-for="s in settingsItems" :key="s.key">
+          <div class="settings-card">
+            <div class="head">
+              <div class="name" x-text="s.label"></div>
+              <span class="chip" :class="s.connected ? 'good' : 'muted'" x-text="s.connected ? 'Connected' : 'Not connected'"></span>
+            </div>
+            <p class="help-text" x-text="settingsHelp[s.key]"></p>
+
+            <!-- Read-only state -->
+            <template x-if="!connectForms[s.key]">
+              <div class="body">
+                <div class="value" x-text="s.value || '(not set)'"></div>
+                <div class="actions">
+                  <button class="btn sm" @click="openConnectForm(s)" x-text="s.connected ? 'Replace' : 'Connect'"></button>
+                  <button class="btn sm" @click="testSetting(s)" x-show="s.connected">Test</button>
+                </div>
+              </div>
+            </template>
+
+            <!-- Inline connect form (x-if so inner expressions only evaluate when form is open) -->
+            <template x-if="connectForms[s.key]">
+              <div class="connect-form">
+                <template x-for="field in connectFields(s.key)" :key="field.name">
+                  <div class="connect-field">
+                    <label>
+                      <span x-text="field.label"></span>
+                      <button type="button" class="btn ghost sm show-toggle"
+                        x-show="field.type === 'password'"
+                        @click="field.shown = !field.shown">
+                        <span x-text="field.shown ? 'Hide' : 'Show'"></span>
+                      </button>
+                    </label>
+                    <input
+                      class="input mono"
+                      :type="(field.type === 'password' && !field.shown) ? 'password' : 'text'"
+                      :placeholder="field.placeholder"
+                      x-model="connectForms[s.key][field.name]"
+                      autocomplete="off"
+                      autocorrect="off"
+                      autocapitalize="none"
+                      spellcheck="false">
+                    <p class="field-help" x-text="field.help" x-show="field.help"></p>
+                  </div>
+                </template>
+
+                <div class="connect-actions">
+                  <button class="btn sm" @click="closeConnectForm(s.key)">Cancel</button>
+                  <button class="btn sm primary" @click="submitConnectForm(s)"
+                    :disabled="connectForms[s.key]._saving"
+                    x-text="connectForms[s.key]._saving ? 'Saving…' : (requiresOAuth(s.key) ? 'Save & Authorize' : 'Save')"></button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <div class="card" style="margin-top: 28px; border-left: 3px solid var(--accent);">
+        <div class="card-title">Quick setup guide</div>
+        <ol class="setup-steps">
+          <li><strong>Claude:</strong> Get your API key from <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> and paste it when you click Connect.</li>
+          <li><strong>Telegram:</strong> Message <a href="https://t.me/BotFather" target="_blank">@BotFather</a>, create a bot, copy the token. Send <code>/start</code> to your bot, then visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and copy <code>chat.id</code>. Click Connect and paste both.</li>
+          <li><strong>Twitter/X:</strong> At <a href="https://developer.x.com" target="_blank">developer.x.com</a>, create a Web App. Add callback URL <code>https://yourdomain.com/api/pa/oauth/twitter-callback</code>. Enable scopes <code>tweet.read tweet.write users.read media.write offline.access</code>. Click Connect, paste Client ID + Secret, authorize.</li>
+          <li><strong>LinkedIn:</strong> At <a href="https://developer.linkedin.com/apps" target="_blank">developer.linkedin.com/apps</a>, create an app. Under Products, request <em>"Share on LinkedIn"</em> and <em>"Sign In with LinkedIn using OpenID Connect"</em>. Add redirect URL <code>https://yourdomain.com/api/pa/oauth/linkedin-callback</code>. Click Connect, paste Client ID + Secret, authorize.</li>
+          <li><strong>Test everything:</strong> Click "Test" on each service to verify.</li>
+          <li><strong>Run Writer:</strong> Go to the Agents tab and click "Run now" on Writer to generate your first draft — it'll auto-render a branded image card when appropriate.</li>
+          <li><strong>Publish:</strong> Once Writer → Editor → Messenger flow the draft to Telegram, tap ✓ Approve, then Run Publisher — it posts to Twitter AND LinkedIn with the same branded PNG.</li>
+        </ol>
+      </div>
+
+        </div><!-- /settings-group-body (connections) -->
+      </div><!-- /settings-group -->
+
+      <!-- Persona picker modal — overlays the whole Settings tab -->
+      <div class="modal-backdrop" x-show="personaPickerOpen" x-transition.opacity @click.self="closePersonaPicker()">
+        <div class="modal-card" style="max-width: 680px;" @click.stop>
+          <div class="modal-head">
+            <h3>✨ Apply a starter persona</h3>
+            <button class="modal-close" @click="closePersonaPicker()" aria-label="Close">×</button>
+          </div>
+          <p class="help-text">Pick a starter and we'll fill in suggested brand voice, uber goal, reference links, and design defaults. Placeholders like <code>{Your project}</code> are literal — replace them with your own details after applying.</p>
+
+          <div class="persona-grid">
+            <template x-for="p in personaList" :key="p.key">
+              <button class="persona-card" @click="applyPersona(p.key)" :disabled="personaApplying">
+                <div class="persona-name" x-text="p.name"></div>
+                <div class="persona-desc" x-text="p.description"></div>
+              </button>
+            </template>
+            <template x-if="personaList.length === 0">
+              <div class="help-text">Loading personas…</div>
+            </template>
+          </div>
+
+          <p class="help-text" style="margin-top: 14px;">⚠️ Applying overwrites your current Brand voice / Uber goal / Reference links / Design language / Accent color / Image font with the persona's starter content. API keys + GitHub config are untouched.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Agent edit drawer -->
+  <template x-if="drawer.open">
+    <div>
+      <div class="drawer-backdrop" @click="drawer.open = false"></div>
+      <aside class="drawer">
+        <div class="drawer-head">
+          <div class="display" style="font-size:22px;">Edit agent</div>
+          <button class="btn-icon" @click="drawer.open = false">&#x2715;</button>
+        </div>
+        <div class="drawer-body">
+          <div class="field">
+            <label class="tiny">Name</label>
+            <p class="help-text">Display name for this agent in the pipeline and cards.</p>
+            <input class="input" x-model="drawer.agent.name">
+          </div>
+          <div class="field">
+            <label class="tiny">Role (one line)</label>
+            <p class="help-text">A short description of what this agent does.</p>
+            <input class="input" x-model="drawer.agent.role">
+          </div>
+          <div class="field">
+            <label class="tiny">Goal</label>
+            <p class="help-text">What should this agent achieve? This helps Claude understand the intent.</p>
+            <textarea class="input" x-model="drawer.agent.goal" rows="2"></textarea>
+          </div>
+          <div class="field">
+            <label class="tiny">Prompt template</label>
+            <p class="help-text">The prompt sent to Claude when this agent runs. Use variables like <code>{{uber_goal}}</code>, <code>{{signals}}</code>, and <code>{{approved_examples}}</code> — they'll be filled in automatically.</p>
+            <textarea class="input mono" x-model="drawer.agent.prompt_template" rows="10"></textarea>
+          </div>
+          <div class="field">
+            <label class="tiny">Schedule</label>
+            <p class="help-text">When this agent should run automatically. "Manual" means it only runs when you click "Run now".</p>
+            <select class="input" x-model="drawer.agent.schedule">
+              <option value="manual">Manual only</option>
+              <option value="0 */6 * * *">Every 6 hours</option>
+              <option value="30 0 * * *">Daily at 06:00 IST</option>
+              <option value="30 14 * * 0">Weekly on Sunday 20:00 IST</option>
+              <option value="custom">Custom cron expression</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="tiny">Enabled</label>
+            <p class="help-text">When off, this agent won't run on schedule and won't process incoming data.</p>
+            <div class="toggle" :class="drawer.agent.enabled ? 'on' : ''" @click="drawer.agent.enabled = !drawer.agent.enabled"></div>
+          </div>
+        </div>
+        <div class="drawer-foot">
+          <button class="btn" @click="drawer.open = false">Cancel</button>
+          <button class="btn primary" @click="saveAgent()">Save</button>
+        </div>
+      </aside>
+    </div>
+  </template>
+
+</div>
+
+</body>
+</html>

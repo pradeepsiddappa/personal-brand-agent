@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Personal Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pa/styles.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234F46E5'/><text x='16' y='21' font-family='Georgia,serif' font-size='16' font-weight='bold' fill='white' text-anchor='middle'>PA</text></svg>">
+<script src="/pa/js/api.js"></script>
+<script src="/pa/js/auth.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body>
+
+<div class="auth-wrap" x-data="authPage()">
+  <div class="auth-card">
+    <div class="auth-logo">⬢</div>
+    <div class="auth-title">Personal Agent</div>
+    <p class="auth-sub">Sign in with a magic link</p>
+
+    <form class="auth-form" @submit.prevent="sendLink()">
+      <input
+        type="email"
+        required
+        placeholder="you@example.com"
+        class="input"
+        x-model="email"
+        :disabled="loading">
+      <button type="submit" class="btn primary" :disabled="loading || !email">
+        <span x-show="!loading">Send magic link →</span>
+        <span x-show="loading">Sending…</span>
+      </button>
+    </form>
+
+    <template x-if="message">
+      <div class="auth-msg" :class="messageKind" x-text="message"></div>
+    </template>
+
+    <p class="auth-hint">One-click email login · no password.<br>
+    Allowlisted emails only while in alpha.</p>
+  </div>
+</div>
+
+
+</body>
+</html>

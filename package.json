@@ -1,0 +1,20 @@
+{
+  "name": "personal-brand-agent",
+  "version": "0.1.0",
+  "description": "Your AI brand team, on your terms. A self-hosted 7-agent content pipeline with human-in-the-loop approval.",
+  "license": "MIT",
+  "private": false,
+  "type": "commonjs",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.37.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod"
+  }
+}

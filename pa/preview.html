@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Preview — Personal Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pa/styles.css">
+<style>
+  .preview-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 32px;
+    padding: 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .preview-panel label { display: block; margin-top: 14px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-3); }
+  .preview-panel input, .preview-panel select, .preview-panel textarea {
+    width: 100%; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 6px;
+    font-family: inherit; font-size: 14px; margin-top: 4px;
+  }
+  .preview-panel textarea { resize: vertical; min-height: 80px; }
+  .preview-panel button { margin-top: 20px; }
+  .preview-stage {
+    background: var(--surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 500px;
+  }
+  .preview-stage > div {
+    width: 100%;
+    max-width: 800px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+  }
+  .preview-stage svg, .preview-stage img { display: block; width: 100%; height: auto; }
+  .panel-help { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="app-wrap" x-data="previewPage()">
+
+  <header class="app-header">
+    <div class="left">
+      <div class="logo">PA</div>
+      <div class="title">Card preview</div>
+    </div>
+    <div class="right">
+      <a class="btn sm" href="/pa">Back to dashboard</a>
+    </div>
+  </header>
+
+  <main class="preview-layout">
+
+    <div class="preview-panel">
+      <label>Kind</label>
+      <select x-model="spec.kind" @change="render()">
+        <option value="stat">Stat (big number)</option>
+        <option value="quote">Quote</option>
+        <option value="milestone">Milestone / Launch</option>
+        <option value="lesson">Lesson / Tip</option>
+      </select>
+
+      <label>Palette</label>
+      <select x-model="spec.palette" @change="render()">
+        <option value="indigo">Indigo</option>
+        <option value="emerald">Emerald</option>
+        <option value="orange">Orange</option>
+        <option value="dark">Dark</option>
+      </select>
+
+      <label>Icon</label>
+      <select x-model="spec.icon" @change="render()">
+        <template x-for="i in icons" :key="i">
+          <option :value="i" x-text="i"></option>
+        </template>
+      </select>
+
+      <!-- STAT fields -->
+      <template x-if="spec.kind === 'stat'">
+        <div>
+          <label>Number</label>
+          <input type="text" x-model="spec.number" @input="render()" placeholder="15+">
+          <label>Label</label>
+          <input type="text" x-model="spec.label" @input="render()" placeholder="Years shipping products">
+          <label>Tagline</label>
+          <input type="text" x-model="spec.tagline" @input="render()" placeholder="yourdomain.com">
+        </div>
+      </template>
+
+      <!-- QUOTE fields -->
+      <template x-if="spec.kind === 'quote'">
+        <div>
+          <label>Quote</label>
+          <textarea x-model="spec.quote" @input="render()"></textarea>
+          <label>Author</label>
+          <input type="text" x-model="spec.author" @input="render()">
+        </div>
+      </template>
+
+      <!-- MILESTONE fields -->
+      <template x-if="spec.kind === 'milestone'">
+        <div>
+          <label>Eyebrow</label>
+          <input type="text" x-model="spec.eyebrow" @input="render()" placeholder="Just Shipped">
+          <label>Title</label>
+          <input type="text" x-model="spec.title" @input="render()">
+          <label>Subtitle</label>
+          <textarea x-model="spec.subtitle" @input="render()"></textarea>
+        </div>
+      </template>
+
+      <!-- LESSON fields -->
+      <template x-if="spec.kind === 'lesson'">
+        <div>
+          <label>Eyebrow</label>
+          <input type="text" x-model="spec.eyebrow" @input="render()" placeholder="Lesson">
+          <label>Body</label>
+          <textarea x-model="spec.body" @input="render()"></textarea>
+        </div>
+      </template>
+
+      <button class="btn primary sm" @click="downloadPng()">Download PNG</button>
+      <p class="panel-help">PNG download runs the SVG through the server-side renderer (resvg). Use this to get a Twitter-ready image.</p>
+    </div>
+
+    <div class="preview-stage">
+      <div x-html="svg"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="/pa/js/api.js"></script>
+<script>
+window.previewPage = function () {
+  return {
+    spec: {
+      kind: 'stat',
+      palette: 'indigo',
+      icon: 'sparkles',
+      number: '10K+',
+      label: 'Users shipped to',
+      tagline: 'yourdomain.com',
+      quote: 'Build the thing. Ship the thing.',
+      author: 'Your Name',
+      eyebrow: 'Just Shipped',
+      title: 'My Latest Project',
+      subtitle: 'First 100 users on board. Zero growth hacks. Pure signal.',
+      body: 'Ship small. Ship often. Learn faster.',
+    },
+    icons: [
+      'rocket', 'zap', 'code', 'brain', 'trending', 'sparkles', 'target', 'users',
+      'graduation-cap', 'hammer', 'lightbulb', 'palette', 'message-circle',
+      'heart', 'bolt', 'mail', 'check', 'arrow',
+    ],
+    svg: '',
+    init() { this.render(); },
+    async render() {
+      const params = new URLSearchParams();
+      Object.entries(this.spec).forEach(([k, v]) => {
+        if (v !== null && v !== undefined && v !== '') params.set(k, v);
+      });
+      const res = await fetch('/api/pa/image/preview?' + params.toString());
+      this.svg = await res.text();
+    },
+    async downloadPng() {
+      const res = await fetch('/api/pa/image/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.spec),
+      });
+      if (!res.ok) { alert('Failed: ' + res.status); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `card-${this.spec.kind}-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  };
+};
+document.addEventListener('alpine:init', () => {
+  // No-op: x-data points to window.previewPage
+});
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+</body>
+</html>

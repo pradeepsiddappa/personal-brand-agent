@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/",        "destination": "/pa/index.html" },
+    { "source": "/auth",    "destination": "/pa/auth.html"  },
+    { "source": "/preview", "destination": "/pa/preview.html" }
+  ],
+  "crons": [
+    { "path": "/api/pa/cron/scout",   "schedule": "0 */6 * * *" },
+    { "path": "/api/pa/cron/writer",  "schedule": "30 0 * * *"  },
+    { "path": "/api/pa/cron/analyst", "schedule": "30 14 * * 0" }
+  ]
+}
