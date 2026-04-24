@@ -9,7 +9,7 @@ const { handler, allow, ok, bad } = require('../../../lib/pa/http');
 module.exports = handler(async (req, res) => {
   allow('POST', req);
   const { user } = await requireUser(req);
-  const { draft_id, action, platforms } = req.body || {};
+  const { draft_id, action, platforms, skip_image } = req.body || {};
   if (!draft_id || !action) return bad(res, 'draft_id and action required');
   if (action !== 'approve' && action !== 'reject') return bad(res, 'action must be approve or reject');
 
@@ -31,9 +31,14 @@ module.exports = handler(async (req, res) => {
   const nextStage = action === 'approve' ? 'publisher' : 'rejected';
   const update = { stage: nextStage };
   if (pf) update.platforms = pf;
+  // Text-only approval: clear image_svg so runPublisher's `if (d.image_svg)`
+  // guard skips the PNG render + media upload. image_spec is preserved on
+  // the draft so the user could re-render later via /pipeline/regenerate-image
+  // if they change their mind before the publisher cron picks it up.
+  if (action === 'approve' && skip_image === true) update.image_svg = null;
   await sb.from('drafts').update(update).eq('id', draft_id);
 
-  const platformTag = pf ? ' (' + pf.join('+') + ')' : '';
+  const platformTag = pf ? ' (' + pf.join('+') + (skip_image ? ', text only' : '') + ')' : '';
   await sb.from('events').insert({
     user_id: user.id,
     agent: 'human',

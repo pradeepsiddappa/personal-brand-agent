@@ -245,7 +245,7 @@ window.appShell = function () {
     saveBulkVoice: function () {
       if (this.bulkVoiceSaving) return;
       var text = (this.bulkVoiceText || '').trim();
-      if (!text) { this.showToast('Paste some tweets first', 'err'); return; }
+      if (!text) { this.showToast('Paste some posts first', 'err'); return; }
       var self = this;
       this.bulkVoiceSaving = true;
       paApi.bulkVoice(text).then(function (res) {
@@ -536,8 +536,24 @@ window.appShell = function () {
       var self = this;
       paApi.regenerateImage(draft.id).then(function (res) {
         self.refreshPipeline();
-        self.showToast('Regenerated image for ' + draft.id + ' (' + (res && res.spec_kind) + ')', 'ok');
+        var msg = 'Regenerated image for ' + draft.id + ' (' + (res && res.spec_kind) + ')';
+        if (res && res.variant && res.variant_total > 1) {
+          msg = 'Poster → ' + res.variant + ' · Style ' + (res.variant_index + 1) + '/' + res.variant_total;
+        }
+        self.showToast(msg, 'ok');
       }).catch(function (e) { self.showToast('Regenerate failed: ' + e.message, 'err'); });
+    },
+
+    // Label for the Re-render button, e.g. "Style 2/4". Returns '' for
+    // non-poster drafts or when the spec has no variant yet (or when
+    // the stored variant is a legacy value the server no longer renders).
+    // Must stay in sync with POSTER_VARIANTS in lib/pa/image.js.
+    posterStyleLabel: function (draft) {
+      var variants = ['classic', 'editorial', 'split', 'gradient', 'studio'];
+      var v = draft && draft.image_spec && draft.image_spec.variant;
+      var idx = variants.indexOf(v);
+      if (idx === -1) return '';
+      return 'Style ' + (idx + 1) + '/' + variants.length;
     },
 
     deleteDraftHard: function (draft) {
@@ -550,13 +566,15 @@ window.appShell = function () {
       }).catch(function (e) { self.showToast('Delete failed: ' + e.message, 'err'); });
     },
 
-    decideDraft: function (draft, action, platforms) {
+    decideDraft: function (draft, action, platforms, opts) {
       if (draft._deciding) return;
       draft._deciding = true;
       var self = this;
-      paApi.decideDraft(draft.id, action, platforms).then(function () {
+      var skipImage = !!(opts && opts.skip_image);
+      paApi.decideDraft(draft.id, action, platforms, opts).then(function () {
+        var tag = skipImage ? ' (text only)' : '';
         var msg = action === 'approve'
-          ? 'Draft ' + draft.id + ' approved' + (platforms && platforms.length ? ' → ' + platforms.join(' + ') : '') + ' — Publisher will pick it up'
+          ? 'Draft ' + draft.id + ' approved' + (platforms && platforms.length ? ' → ' + platforms.join(' + ') : '') + tag + ' — Publisher will pick it up'
           : 'Draft ' + draft.id + ' rejected';
         self.showToast(msg, 'ok');
         self.refreshPipeline();

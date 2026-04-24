@@ -59,7 +59,7 @@
           <p class="help-text">One sentence. This is the north star every agent reads before acting:</p>
           <ul class="help-list">
             <li><strong>Scout</strong> filters signals that match your goal</li>
-            <li><strong>Writer</strong> drafts tweets that serve it</li>
+            <li><strong>Writer</strong> drafts posts that serve it</li>
             <li><strong>Editor</strong> rejects drafts that drift from it</li>
             <li><strong>Analyst</strong> scores weekly performance against it</li>
           </ul>
@@ -102,7 +102,7 @@
           <div>
             <div class="flow-eyebrow">THE FLOW</div>
             <h1 class="flow-title" x-text="agentCountLabel + ', one desk.'"></h1>
-            <p class="flow-subtitle">Signals go in on the left. Tweets come out on the right. You're the only human in the loop — between Messenger and Publisher.</p>
+            <p class="flow-subtitle">Signals go in on the left. Posts come out on the right. You're the only human in the loop — between Messenger and Publisher.</p>
           </div>
           <div class="flow-meta">
             <div class="flow-pill flight" x-show="inFlightCount > 0">
@@ -207,7 +207,7 @@
       <div class="card" style="margin-top: 24px;">
         <div class="card-title">Analyst</div>
         <p x-text="analystSummary"></p>
-        <p class="help-text" style="margin-top:8px;">The Analyst runs every Sunday at 20:00 IST. It reviews the week's drafts, tracks engagement, and sends recommendations to improve future tweets.</p>
+        <p class="help-text" style="margin-top:8px;">The Analyst runs every Sunday at 20:00 IST. It reviews the week's drafts, tracks engagement, and sends recommendations to improve future posts.</p>
       </div>
     </section>
 
@@ -243,7 +243,7 @@
           <button class="btn sm" @click="refreshPipeline(); loadEvents()">Refresh</button>
         </div>
       </div>
-      <p class="help-text">Drafts waiting for your decision. <strong>Post to both</strong> cross-posts to Twitter + LinkedIn. <strong>Twitter only</strong> / <strong>LinkedIn only</strong> posts to just that platform. <strong>Reject</strong> drops it. <strong>✎ Edit</strong> lets you fix copy directly. <strong>✨ Tweak with AI</strong> rewrites the draft based on a one-line instruction ("make it shorter", "more casual", "lead with the number").</p>
+      <p class="help-text">Drafts waiting for your decision. <strong>Post to both</strong> cross-posts to X + LinkedIn. <strong>Post on X</strong> / <strong>Post on LinkedIn</strong> posts to just that platform. <strong>📝 X (text only)</strong> posts to X without the image — useful when the auto-rendered image doesn't fit. <strong>Reject</strong> drops it. <strong>✎ Edit</strong> lets you fix copy directly. <strong>✨ Tweak with AI</strong> rewrites the draft based on a one-line instruction ("make it shorter", "more casual", "lead with the number").</p>
 
       <template x-if="pendingDrafts.length === 0">
         <div class="empty-state">
@@ -260,11 +260,11 @@
               <span class="draft-category" x-text="(d.category || '').toUpperCase()"></span>
               <span class="draft-category" x-show="d.draft_type && d.draft_type !== 'single'" x-text="(d.draft_type || '').toUpperCase()"></span>
               <span class="draft-meta" x-show="d.confidence" x-text="'conf: ' + d.confidence"></span>
-              <span class="draft-meta" x-text="(d.draft_type === 'thread' && d.thread_parts ? d.thread_parts.length + ' tweets' : (d.text || '').length + ' / ' + (d.draft_type === 'longpost' ? 3000 : 280))"></span>
+              <span class="draft-meta" x-text="(d.draft_type === 'thread' && d.thread_parts ? d.thread_parts.length + ' posts' : (d.text || '').length + ' / ' + (d.draft_type === 'longpost' ? 3000 : 280))"></span>
             </div>
             <div class="approval-tabs" x-data="{ view: 'twitter' }">
               <div class="approval-tab-bar" x-show="d.text_linkedin">
-                <button class="approval-tab" :class="view === 'twitter' ? 'active' : ''" @click="view = 'twitter'">🐦 Twitter</button>
+                <button class="approval-tab" :class="view === 'twitter' ? 'active' : ''" @click="view = 'twitter'">🐦 X</button>
                 <button class="approval-tab" :class="view === 'linkedin' ? 'active' : ''" @click="view = 'linkedin'">💼 LinkedIn</button>
               </div>
 
@@ -310,12 +310,17 @@
 
             <div class="approval-actions" x-show="!d._editing">
               <button class="btn primary" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter','linkedin'])" x-text="d._deciding ? 'Working…' : '✓ Post to both'"></button>
-              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter'])">Twitter only</button>
-              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['linkedin'])">LinkedIn only</button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter'])">Post on X</button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['linkedin'])">Post on LinkedIn</button>
+              <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'approve', ['twitter'], { skip_image: true })" title="Post to X without the image — text only">📝 X (text only)</button>
               <button class="btn" :class="d._deciding ? 'running' : ''" @click="decideDraft(d, 'reject')">✕ Reject</button>
               <button class="btn ghost" @click="startEditDraft(d)" title="Inline edit the draft text">✎ Edit</button>
               <button class="btn ghost" @click="startTweakDraft(d)" x-show="!d._tweaking" title="Ask AI to rewrite based on your one-line instruction">✨ Tweak with AI</button>
-              <button class="btn ghost" @click="regenerateImage(d)" title="Re-render the image from the current tweet text (fixes empty cards)">🔄 Re-render</button>
+              <button class="btn ghost" @click="regenerateImage(d)"
+                      :title="d.image_spec && d.image_spec.kind === 'poster' ? 'Re-render — cycles through 3 poster styles (Classic / Minimalist / Typographic)' : 'Re-render the image from the current post text (fixes empty cards)'">
+                🔄 Re-render
+                <span class="style-chip" x-show="d.image_spec && d.image_spec.kind === 'poster' && d.image_spec.variant" x-text="posterStyleLabel(d)"></span>
+              </button>
               <button class="btn ghost" @click="deleteDraftHard(d)" title="Hard-delete (for hallucinated drafts)">🗑 Delete</button>
             </div>
           </div>
@@ -501,9 +506,9 @@
         <label class="settings-label" style="margin-top:18px;">Link library <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
         <textarea class="input" rows="6" x-model="brandForm.reference_links"
           placeholder="• {Your main project} → https://yourdomain.com&#10;• {Another project / case study} → https://yourdomain.com/x&#10;• GitHub → https://github.com/yourusername&#10;• Newsletter / blog → https://yourdomain.com/newsletter"></textarea>
-        <p class="help-text" style="margin-top:8px;">One bullet per link with a short description of what it is. Writer appends the matching URL to the tweet ONLY when the draft is specifically about that thing — never forces a link in. Different from Active promotions (which drives posters + dedicated promo drafts).</p>
+        <p class="help-text" style="margin-top:8px;">One bullet per link with a short description of what it is. Writer appends the matching URL to the post ONLY when the draft is specifically about that thing — never forces a link in. Different from Active promotions (which drives posters + dedicated promo drafts).</p>
 
-        <label class="settings-label" style="margin-top:18px;">Custom tweet templates <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
+        <label class="settings-label" style="margin-top:18px;">Custom post templates <span style="color: var(--accent-strong); font-weight:600;">(optional)</span></label>
         <textarea class="input" rows="5" x-model="brandForm.tweet_templates"
           placeholder="### Template: my-format-name&#10;When to use: [short description]&#10;Pattern:&#10;[Line 1 with placeholder]&#10;[Line 2 with placeholder]&#10;&#10;### Template: another-format&#10;..."></textarea>
         <p class="help-text" style="margin-top:8px;">Writer already has 8 built-in formats (breaking-drop, hot-take, build-log, teach-1-thing, list-post, counter-intuitive, personal-milestone, quote-take). Add your own here — they stack on top of the defaults. Leave blank to use just the 8 built-ins.</p>
@@ -536,9 +541,9 @@
           <h3>Inspiration vault — bulk paste</h3>
           <button class="btn sm primary" @click="saveBulkVoice()" :class="bulkVoiceSaving ? 'running' : ''" x-text="bulkVoiceSaving ? 'Adding…' : 'Add to voice library'"></button>
         </div>
-        <p class="help-text">Paste 10-30 tweets you admire — one tweet per block, separated by a <strong>blank line</strong>. Each block becomes a voice example Writer reads on every run. Way faster than forwarding them one-by-one to Telegram.</p>
+        <p class="help-text">Paste 10-30 posts you admire — one post per block, separated by a <strong>blank line</strong>. Each block becomes a voice example Writer reads on every run. Way faster than forwarding them one-by-one to Telegram.</p>
         <textarea class="input" rows="8" x-model="bulkVoiceText"
-          placeholder="Someone built a swarm of thousands of AI agents. Here's what it does:&#10;→ Spins up autonomous agents&#10;→ Each has memory + personality&#10;17,300 stars. +2,907 in a day. 100% open source.&#10;&#10;Shipped a new feature today. 3x response rate on day one. The unsexy truth: we spent 2 weeks on edge-case prompting, not on the model choice.&#10;&#10;Most founders miss this: Users don't care which framework you picked. They care if it works.&#10;&#10;(Paste more tweets, blank line between each)"></textarea>
+          placeholder="Someone built a swarm of thousands of AI agents. Here's what it does:&#10;→ Spins up autonomous agents&#10;→ Each has memory + personality&#10;17,300 stars. +2,907 in a day. 100% open source.&#10;&#10;Shipped a new feature today. 3x response rate on day one. The unsexy truth: we spent 2 weeks on edge-case prompting, not on the model choice.&#10;&#10;Most founders miss this: Users don't care which framework you picked. They care if it works.&#10;&#10;(Paste more posts, blank line between each)"></textarea>
         <p class="help-text" style="margin-top:8px;">Safe to re-run — duplicates are fine, Writer just picks the 8 most recent on each run.</p>
       </div>
 

@@ -137,7 +137,7 @@
     resetAgent: function (id) { return request('/agents/reset', { method: 'POST', body: { id: id } }); },
     getDrafts: function () { return request('/pipeline/drafts'); },
     getEvents: function () { return request('/pipeline/events'); },
-    decideDraft: function (draftId, action, platforms) { return request('/pipeline/decide', { method: 'POST', body: { draft_id: draftId, action: action, platforms: platforms } }); },
+    decideDraft: function (draftId, action, platforms, opts) { return request('/pipeline/decide', { method: 'POST', body: { draft_id: draftId, action: action, platforms: platforms, skip_image: !!(opts && opts.skip_image) } }); },
     deleteDraft: function (draftId) { return request('/pipeline/delete', { method: 'POST', body: { draft_id: draftId } }); },
     regenerateImage: function (draftId) { return request('/pipeline/regenerate-image', { method: 'POST', body: { draft_id: draftId } }); },
     editDraft: function (draftId, fields) { return request('/pipeline/edit-draft', { method: 'POST', body: Object.assign({ draft_id: draftId }, fields) }); },

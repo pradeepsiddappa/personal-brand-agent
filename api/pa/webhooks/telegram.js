@@ -10,9 +10,10 @@
 
 const { admin } = require('../../../lib/pa/supabase');
 const { decrypt } = require('../../../lib/pa/crypto');
-const { callApi, sendDraftCard } = require('../../../lib/pa/telegram');
+const { callApi, sendDraftCard, buildDraftKeyboard, editPhotoMedia, getConfig } = require('../../../lib/pa/telegram');
 const { applyEdit } = require('../../../lib/pa/github');
 const { extractUrls } = require('../../../lib/pa/url-reader');
+const { renderSvg, svgToPng, POSTER_VARIANTS } = require('../../../lib/pa/image');
 const { generateFromSeed, runAgent } = require('../../../lib/pa/agent-runner');
 const { handler, ok } = require('../../../lib/pa/http');
 
@@ -250,7 +251,7 @@ async function handleIncomingText(msg, chatId) {
   const keyboard = {
     inline_keyboard: [
       [
-        { text: '✍️ Tweet',     callback_data: 'cap_tweet:' + voiceId },
+        { text: '✍️ Post',      callback_data: 'cap_tweet:' + voiceId },
         { text: '🧵 Thread',    callback_data: 'cap_thread:' + voiceId },
       ],
       [
@@ -343,8 +344,8 @@ async function handleCaptureCallback(cb, action, voiceId, res) {
       const reply_markup = {
         inline_keyboard: [
           [ { text: '✓ Post to both',  callback_data: 'both:'  + draft.id },
-            { text: '🐦 Twitter only',  callback_data: 'twitter:' + draft.id } ],
-          [ { text: '💼 LinkedIn only', callback_data: 'linkedin:' + draft.id },
+            { text: '🐦 Post on X',     callback_data: 'twitter:' + draft.id } ],
+          [ { text: '💼 Post on LinkedIn', callback_data: 'linkedin:' + draft.id },
             { text: '✕ Reject',         callback_data: 'reject:'   + draft.id } ],
         ],
       };
@@ -369,6 +370,108 @@ async function tokenForChat(sb, chatId) {
     .maybeSingle();
   if (!s?.telegram_bot_token_enc) return null;
   try { return decrypt(s.telegram_bot_token_enc); } catch { return null; }
+}
+
+// Poster style picker — re-renders the draft's image with the selected
+// variant and swaps the photo on the existing Telegram message. Decision
+// buttons stay so the user can post immediately after picking a design.
+//
+// callback_data: `style_<variant>:<draft_id>` (e.g. style_studio:p-abc1)
+async function handleStyleCallback(cb, action, draftId, res) {
+  const variant = action.replace(/^style_/, '');
+  const sb = admin();
+
+  // Look up the draft + the user's bot token (needed to ack + edit message).
+  // Use the same getConfig() helper the rest of the codebase uses so we
+  // read the correct column (telegram_bot_token_enc, not *_token_enc).
+  const { data: draft } = await sb.from('drafts').select('*').eq('id', draftId).maybeSingle();
+  let token = null;
+  let chatId = null;
+  let messageId = null;
+  if (cb.message) {
+    // Trust the chat_id from the callback over settings.telegram_chat_id —
+    // the user tapped FROM this chat, so it's authoritative.
+    chatId = cb.message.chat && cb.message.chat.id;
+    messageId = cb.message.message_id;
+  }
+  if (draft && draft.user_id) {
+    try {
+      const cfg = await getConfig(draft.user_id);
+      token = cfg.token;
+      // Fall back to settings.telegram_chat_id only if the callback didn't have one.
+      if (!chatId) chatId = cfg.chatId;
+    } catch (e) {
+      // Telegram not configured — leave token null and return quietly below.
+      console.warn('[pa] style callback: getConfig failed:', e.message);
+    }
+  }
+
+  if (!draft) {
+    if (token) await ackCallback(token, cb.id, 'Draft not found');
+    return ok(res, { ignored: 'draft not found', draftId });
+  }
+  if (!POSTER_VARIANTS.includes(variant)) {
+    if (token) await ackCallback(token, cb.id, 'Unknown style: ' + variant);
+    return ok(res, { ignored: 'unknown variant', variant });
+  }
+  if (!draft.image_spec || draft.image_spec.kind !== 'poster') {
+    if (token) await ackCallback(token, cb.id, 'Style picker is poster-only');
+    return ok(res, { ignored: 'not a poster', kind: draft.image_spec && draft.image_spec.kind });
+  }
+
+  // Re-render with the new variant. Apply user's brand accent + font as
+  // regenerate-image.js does so the swapped image stays on-brand.
+  const newSpec = Object.assign({}, draft.image_spec, { variant: variant });
+  const { data: brand } = await sb.from('settings')
+    .select('brand_accent_hex, image_font')
+    .eq('user_id', draft.user_id)
+    .maybeSingle();
+  if (brand && brand.brand_accent_hex) newSpec.brand_accent_hex = brand.brand_accent_hex;
+  newSpec.font_family = (brand && brand.image_font) || 'Inter';
+
+  let newSvg;
+  try {
+    newSvg = renderSvg(newSpec);
+  } catch (e) {
+    if (token) await ackCallback(token, cb.id, 'Render failed: ' + e.message.slice(0, 60));
+    return ok(res, { error: 'render', message: e.message });
+  }
+
+  await sb.from('drafts').update({ image_svg: newSvg, image_spec: newSpec }).eq('id', draftId);
+  await sb.from('events').insert({
+    user_id: draft.user_id, agent: 'human', kind: 'review',
+    title: 'Style → ' + variant + ' for ' + draftId,
+    detail: 'Picked from Telegram',
+    tag: 'style', ref_id: draftId,
+  });
+
+  // Build the keyboard with the new active indicator + swap the image.
+  const updatedDraft = Object.assign({}, draft, { image_svg: newSvg, image_spec: newSpec });
+  const reply_markup = buildDraftKeyboard(updatedDraft);
+
+  if (token && chatId && messageId) {
+    try {
+      const png = await svgToPng(newSvg);
+      await editPhotoMedia(token, {
+        chat_id: chatId,
+        message_id: messageId,
+        photo: png,
+        // Telegram editMessageMedia REQUIRES the caption again — passing
+        // none would clear it. We re-attach the original caption & markup.
+        caption: cb.message.caption || cb.message.text || '',
+        parse_mode: 'Markdown',
+        reply_markup,
+        filename: draftId + '.png',
+      });
+      await ackCallback(token, cb.id, 'Style → ' + variant);
+    } catch (e) {
+      console.warn('[pa] style editMessageMedia failed:', e.message);
+      // Last-ditch ack so the spinner clears even if the swap failed.
+      try { await ackCallback(token, cb.id, 'Style saved (refresh)'); } catch (_) {}
+    }
+  }
+
+  return ok(res, { handled: true, action: 'style', variant: variant, draft_id: draftId });
 }
 
 // SEO callback router. On Apply, we look up the recommendation, fetch
@@ -503,6 +606,14 @@ module.exports = handler(async (req, res) => {
     return await handleSeoCallback(cb, action, refId, res);
   }
 
+  // ── Route: poster style picker (style_classic / _editorial / _split / _gradient / _studio)
+  // Re-renders the draft's image with the chosen variant and swaps the
+  // photo on the existing Telegram message in place. The post-decision
+  // buttons stay in the keyboard so the user can approve right after.
+  if (action.indexOf('style_') === 0) {
+    return await handleStyleCallback(cb, action, refId, res);
+  }
+
   // ── Route: draft Approve / Reject / Edit (default below) ────
   const draftId = refId;
   const { data: draft } = await sb.from('drafts').select('*').eq('id', draftId).maybeSingle();
@@ -534,23 +645,31 @@ module.exports = handler(async (req, res) => {
   let ackText = '';
 
   // Approve-with-platform buttons on the new Telegram card.
-  const approvePlatforms = {
-    approve:  ['twitter', 'linkedin'],
-    both:     ['twitter', 'linkedin'],
-    twitter:  ['twitter'],
-    linkedin: ['linkedin'],
+  // Each entry carries: platforms[] + skipImage flag. text_x is the
+  // text-only-to-X path: post to twitter only, no image attached.
+  const approveActions = {
+    approve:  { platforms: ['twitter', 'linkedin'], skipImage: false },
+    both:     { platforms: ['twitter', 'linkedin'], skipImage: false },
+    twitter:  { platforms: ['twitter'],             skipImage: false },
+    linkedin: { platforms: ['linkedin'],            skipImage: false },
+    text_x:   { platforms: ['twitter'],             skipImage: true  },
   };
 
-  if (approvePlatforms[action]) {
-    const pf = approvePlatforms[action];
-    await sb.from('drafts').update({ stage: 'publisher', platforms: pf }).eq('id', draftId);
+  if (approveActions[action]) {
+    const { platforms: pf, skipImage } = approveActions[action];
+    const update = { stage: 'publisher', platforms: pf };
+    // Clear image_svg so runPublisher's `if (d.image_svg)` guard skips
+    // PNG render + media upload. image_spec stays on the draft.
+    if (skipImage) update.image_svg = null;
+    await sb.from('drafts').update(update).eq('id', draftId);
+    const tag = skipImage ? ' (text only)' : '';
     await sb.from('events').insert({
       user_id: draft.user_id, agent: 'human', kind: 'approved',
-      title: `Approved ${draftId} (${pf.join('+')})`,
+      title: `Approved ${draftId} (${pf.join('+')}${tag})`,
       detail: draft.text?.slice(0, 100), tag: 'approved', ref_id: draftId,
     });
-    statusLine = '✓ *Approved* → posting to ' + pf.join(' + ') + '…';
-    ackText = 'Publishing to ' + pf.join('+') + '…';
+    statusLine = '✓ *Approved* → posting to ' + pf.join(' + ') + tag + '…';
+    ackText = 'Publishing to ' + pf.join('+') + tag + '…';
     // Mark for publishing after we ack. The publish itself runs below
     // the ack so Telegram's spinner dismisses first.
     var pendingPublishFor = draft.user_id;
